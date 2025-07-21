@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognito Passwordless Auth Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@3.9.0/dist/vuetify.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@3.9.0/dist/vuetify.min.js"></script>
+    <script src="https://unpkg.com/@simplewebauthn/browser@10.0.0/dist/bundle/index.umd.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <v-app>
+            <v-main>
+                <v-container class="fill-height">
+                    <v-row justify="center" align="center">
+                        <v-col cols="12" sm="8" md="6" lg="4">
+                            <v-card class="elevation-3 pa-6">
+                                <v-card-title class="text-h4 text-center mb-4">
+                                    <v-icon left class="mr-2">mdi-shield-check</v-icon>
+                                    パスワードレス認証
+                                </v-card-title>
+
+                                <v-card-text>
+                                    <!-- ランディングページ -->
+                                    <div v-if="currentStep === 'landing'">
+                                        <div class="text-center mb-6">
+                                            <v-icon size="80" color="primary" class="mb-4">mdi-security</v-icon>
+                                            <h2 class="text-h4 mb-4">セキュアなパスワードレス認証</h2>
+                                            <p class="text-body-1 mb-4">
+                                                メールアドレスだけでログインできる、<br>
+                                                安全で便利な認証システムです。
+                                            </p>
+                                        </div>
+
+                                        <v-list class="mb-6">
+                                            <v-list-item>
+                                                <template v-slot:prepend>
+                                                    <v-icon color="success">mdi-check-circle</v-icon>
+                                                </template>
+                                                <v-list-item-title>パスワード不要</v-list-item-title>
+                                                <v-list-item-subtitle>複雑なパスワードを覚える必要がありません</v-list-item-subtitle>
+                                            </v-list-item>
+                                            <v-list-item>
+                                                <template v-slot:prepend>
+                                                    <v-icon color="success">mdi-check-circle</v-icon>
+                                                </template>
+                                                <v-list-item-title>高いセキュリティ</v-list-item-title>
+                                                <v-list-item-subtitle>AWS Cognitoによる企業レベルのセキュリティ</v-list-item-subtitle>
+                                            </v-list-item>
+                                            <v-list-item>
+                                                <template v-slot:prepend>
+                                                    <v-icon color="success">mdi-check-circle</v-icon>
+                                                </template>
+                                                <v-list-item-title>簡単ログイン</v-list-item-title>
+                                                <v-list-item-subtitle>メールで受信したコードを入力するだけ</v-list-item-subtitle>
+                                            </v-list-item>
+                                        </v-list>
+
+                                        <v-btn
+                                            @click="startAuth"
+                                            color="primary"
+                                            size="large"
+                                            block
+                                            class="mt-4"
+                                        >
+                                            <v-icon left>mdi-email</v-icon>
+                                            メール認証でログイン
+                                        </v-btn>
+
+                                        <v-btn
+                                            @click="startBiometricAuth"
+                                            color="success"
+                                            size="large"
+                                            block
+                                            class="mt-2"
+                                        >
+                                            <v-icon left>mdi-fingerprint</v-icon>
+                                            生体認証でログイン
+                                        </v-btn>
+                                    </div>
+
+                                    <v-form v-model="valid">
+                                        <!-- メール送信フェーズ -->
+                                        <div v-if="currentStep === 'email'">
+                                            <v-text-field
+                                                v-model="email"
+                                                :rules="emailRules"
+                                                label="メールアドレス"
+                                                prepend-icon="mdi-email"
+                                                type="email"
+                                                required
+                                                :disabled="loading"
+                                                @keyup.enter="sendCode"
+                                            ></v-text-field>
+                                            <v-btn
+                                                @click="sendCode"
+                                                :loading="loading"
+                                                :disabled="!valid || loading"
+                                                color="primary"
+                                                block
+                                                class="mt-4"
+                                            >
+                                                認証コードを送信
+                                            </v-btn>
+                                            <v-btn
+                                                @click="() => currentStep = 'landing'"
+                                                :disabled="loading"
+                                                color="secondary"
+                                                block
+                                                variant="outlined"
+                                                class="mt-2"
+                                            >
+                                                戻る
+                                            </v-btn>
+                                        </div>
+
+                                        <!-- コード確認フェーズ -->
+                                        <div v-if="currentStep === 'code'">
+                                            <v-text-field
+                                                v-model="code"
+                                                :rules="codeRules"
+                                                label="認証コード"
+                                                prepend-icon="mdi-key"
+                                                type="text"
+                                                required
+                                                :disabled="loading"
+                                                @keyup.enter="verifyCode"
+                                            ></v-text-field>
+                                            <v-btn
+                                                @click="verifyCode"
+                                                :loading="loading"
+                                                :disabled="!code || loading"
+                                                color="primary"
+                                                block
+                                                class="mt-4"
+                                            >
+                                                認証
+                                            </v-btn>
+                                            <v-btn
+                                                @click="goBack"
+                                                :disabled="loading"
+                                                color="secondary"
+                                                block
+                                                variant="outlined"
+                                                class="mt-2"
+                                            >
+                                                戻る
+                                            </v-btn>
+                                        </div>
+
+                                        <!-- 生体認証フェーズ -->
+                                        <div v-if="currentStep === 'biometric'">
+                                            <div class="text-center mb-4">
+                                                <v-icon size="80" color="success" class="mb-4">mdi-fingerprint</v-icon>
+                                                <h2 class="text-h5 mb-2">生体認証</h2>
+                                                <p class="text-body-2">
+                                                    まず最初にメールアドレスを入力して、<br>
+                                                    生体認証の設定を行います。
+                                                </p>
+                                            </div>
+
+                                            <v-text-field
+                                                v-model="email"
+                                                :rules="emailRules"
+                                                label="メールアドレス"
+                                                prepend-icon="mdi-email"
+                                                type="email"
+                                                required
+                                                :disabled="loading"
+                                            ></v-text-field>
+
+                                            <v-btn
+                                                @click="biometricAuth"
+                                                :loading="loading"
+                                                :disabled="!email || loading"
+                                                color="success"
+                                                block
+                                                class="mt-4"
+                                            >
+                                                <v-icon left>mdi-fingerprint</v-icon>
+                                                生体認証でログイン
+                                            </v-btn>
+                                            
+                                            <v-alert type="info" class="mt-4" variant="tonal">
+                                                初回は自動的に生体認証を設定します
+                                            </v-alert>
+
+                                            <v-btn
+                                                @click="() => currentStep = 'landing'"
+                                                :disabled="loading"
+                                                color="secondary"
+                                                block
+                                                variant="outlined"
+                                                class="mt-2"
+                                            >
+                                                戻る
+                                            </v-btn>
+                                        </div>
+
+                                        <!-- 認証成功フェーズ -->
+                                        <div v-if="currentStep === 'success'">
+                                            <v-alert type="success" class="mb-4">
+                                                <v-icon slot="prepend">mdi-check-circle</v-icon>
+                                                認証が完了しました！
+                                            </v-alert>
+                                            
+                                            <!-- ユーザー情報表示 -->
+                                            <v-card class="mb-4" variant="outlined">
+                                                <v-card-title>
+                                                    <v-icon left>mdi-account</v-icon>
+                                                    ユーザー情報
+                                                </v-card-title>
+                                                <v-card-text>
+                                                    <p><strong>メールアドレス:</strong> {{ authenticatedUser?.email }}</p>
+                                                    <p><strong>ログイン時刻:</strong> {{ authenticatedUser?.loginTime }}</p>
+                                                    <p v-if="authenticatedUser?.authType"><strong>認証方式:</strong> {{ authenticatedUser?.authType }}</p>
+                                                </v-card-text>
+                                            </v-card>
+
+                                            <!-- ダッシュボード風のコンテンツ -->
+                                            <v-card class="mb-4" variant="outlined">
+                                                <v-card-title>
+                                                    <v-icon left>mdi-view-dashboard</v-icon>
+                                                    ダッシュボード
+                                                </v-card-title>
+                                                <v-card-text>
+                                                    <p>パスワードレス認証によるログインが完了しました。</p>
+                                                    <p>セキュアな環境でアプリケーションをご利用いただけます。</p>
+                                                </v-card-text>
+                                            </v-card>
+
+                                            <v-btn
+                                                @click="signOut"
+                                                color="error"
+                                                block
+                                                variant="outlined"
+                                            >
+                                                <v-icon left>mdi-logout</v-icon>
+                                                サインアウト
+                                            </v-btn>
+                                        </div>
+                                    </v-form>
+
+                                    <!-- エラーメッセージ -->
+                                    <v-alert v-if="error" type="error" class="mt-4">
+                                        {{ error }}
+                                    </v-alert>
+
+                                    <!-- 情報メッセージ -->
+                                    <v-alert v-if="info" type="info" class="mt-4">
+                                        {{ info }}
+                                    </v-alert>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                </v-container>
+            </v-main>
+        </v-app>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        const { createVuetify } = Vuetify;
+
+        // Vuetify設定
+        const vuetify = createVuetify({
+            theme: {
+                defaultTheme: 'light',
+                themes: {
+                    light: {
+                        colors: {
+                            primary: '#1976D2',
+                            secondary: '#424242',
+                            accent: '#82B1FF',
+                            error: '#FF5252',
+                            info: '#2196F3',
+                            success: '#4CAF50',
+                            warning: '#FB8C00',
+                        },
+                    },
+                },
+            },
+            icons: {
+                defaultSet: 'mdi',
+            },
+        });
+
+        // API設定
+        const API_ENDPOINT = 'http://localhost:3001';
+
+        // Vue アプリケーション
+        const app = createApp({
+            data() {
+                return {
+                    valid: false,
+                    email: '',
+                    code: '',
+                    loading: false,
+                    error: '',
+                    info: '',
+                    currentStep: 'landing', // landing, email, code, biometric, success
+                    authenticatedUser: null,
+                    emailRules: [
+                        v => !!v || 'メールアドレスは必須です',
+                        v => /.+@.+\..+/.test(v) || '正しいメールアドレスを入力してください',
+                    ],
+                    codeRules: [
+                        v => !!v || '認証コードは必須です',
+                        v => v.length === 6 || '認証コードは6桁で入力してください',
+                    ],
+                }
+            },
+            methods: {
+                async sendCode() {
+                    if (!this.valid) return;
+
+                    this.loading = true;
+                    this.error = '';
+                    this.info = '';
+
+                    try {
+                        const response = await fetch(`${API_ENDPOINT}/send-code`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                email: this.email,
+                                temporaryPassword: Math.random().toString(36).slice(-16)
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('認証コードの送信に失敗しました');
+                        }
+
+                        const result = await response.json();
+                        this.currentStep = 'code';
+                        this.info = `${this.email} に認証コードを送信しました`;
+                        
+                        // 開発モードの場合、コードを表示
+                        if (result.code) {
+                            this.info += ` (開発モード: ${result.code})`;
+                        }
+
+                    } catch (error) {
+                        this.error = error.message || '認証コードの送信に失敗しました';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async verifyCode() {
+                    if (!this.code) return;
+
+                    this.loading = true;
+                    this.error = '';
+                    this.info = '';
+
+                    try {
+                        const response = await fetch(`${API_ENDPOINT}/verify-code`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                email: this.email,
+                                code: this.code
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('認証コードが正しくありません');
+                        }
+
+                        this.currentStep = 'success';
+                        this.authenticatedUser = {
+                            email: this.email,
+                            loginTime: new Date().toLocaleString('ja-JP'),
+                            authType: 'メール認証'
+                        };
+                        this.info = '認証が完了しました';
+
+                    } catch (error) {
+                        this.error = error.message || '認証コードの確認に失敗しました';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                startAuth() {
+                    this.currentStep = 'email';
+                    this.resetForm();
+                },
+
+                signOut() {
+                    this.currentStep = 'landing';
+                    this.authenticatedUser = null;
+                    this.resetForm();
+                },
+
+                goBack() {
+                    this.currentStep = 'email';
+                    this.code = '';
+                    this.error = '';
+                    this.info = '';
+                },
+
+                startBiometricAuth() {
+                    this.currentStep = 'biometric';
+                    this.resetForm();
+                },
+
+                async biometricAuth() {
+                    if (!this.email) return;
+
+                    this.loading = true;
+                    this.error = '';
+                    this.info = '';
+
+                    try {
+                        // ブラウザがWebAuthnをサポートしているかチェック
+                        if (!window.SimpleWebAuthnBrowser) {
+                            throw new Error('WebAuthn is not supported by this browser');
+                        }
+
+                        // まず既存の認証情報があるかチェック
+                        let authOptions = null;
+                        try {
+                            const authResponse = await fetch(`${API_ENDPOINT}/webauthn/auth-begin`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    email: this.email
+                                })
+                            });
+
+                            if (authResponse.ok) {
+                                authOptions = await authResponse.json();
+                                console.log('Found existing credentials, proceeding with authentication');
+                            }
+                        } catch (error) {
+                            console.log('No existing credentials found, will register new one');
+                        }
+
+                        if (authOptions) {
+                            // 既存認証情報がある場合：認証を実行
+                            const authCredential = await SimpleWebAuthnBrowser.startAuthentication(authOptions);
+
+                            const verificationResponse = await fetch(`${API_ENDPOINT}/webauthn/auth-complete`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    email: this.email,
+                                    credential: authCredential
+                                })
+                            });
+
+                            if (!verificationResponse.ok) {
+                                throw new Error('Authentication verification failed');
+                            }
+
+                            const verificationResult = await verificationResponse.json();
+
+                            if (verificationResult.verified) {
+                                this.currentStep = 'success';
+                                this.authenticatedUser = {
+                                    email: this.email,
+                                    loginTime: new Date().toLocaleString('ja-JP'),
+                                    authType: '生体認証'
+                                };
+                                this.info = '生体認証でのログインが完了しました';
+                            } else {
+                                throw new Error('Authentication failed');
+                            }
+                        } else {
+                            // 既存認証情報がない場合：新規登録
+                            console.log('Registering new biometric credential');
+                            const registerResponse = await fetch(`${API_ENDPOINT}/webauthn/register-begin`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    email: this.email
+                                })
+                            });
+
+                            if (!registerResponse.ok) {
+                                throw new Error('Registration start failed');
+                            }
+
+                            const registrationOptions = await registerResponse.json();
+                            const registrationCredential = await SimpleWebAuthnBrowser.startRegistration(registrationOptions);
+
+                            const verificationResponse = await fetch(`${API_ENDPOINT}/webauthn/register-complete`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    email: this.email,
+                                    credential: registrationCredential
+                                })
+                            });
+
+                            if (!verificationResponse.ok) {
+                                throw new Error('Registration verification failed');
+                            }
+
+                            const verificationResult = await verificationResponse.json();
+
+                            if (verificationResult.verified) {
+                                this.currentStep = 'success';
+                                this.authenticatedUser = {
+                                    email: this.email,
+                                    loginTime: new Date().toLocaleString('ja-JP'),
+                                    authType: '生体認証（新規設定）'
+                                };
+                                this.info = '生体認証の設定とログインが完了しました';
+                            } else {
+                                throw new Error('Registration failed');
+                            }
+                        }
+
+                    } catch (error) {
+                        console.error('Biometric authentication error:', error);
+                        this.error = error.message || '生体認証に失敗しました';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                resetForm() {
+                    this.email = '';
+                    this.code = '';
+                    this.error = '';
+                    this.info = '';
+                    this.valid = false;
+                }
+            }
+        });
+
+        app.use(vuetify);
+        app.mount('#app');
+    </script>
+
+    <style>
+        .fill-height {
+            min-height: 100vh;
+        }
+    </style>
+</body>
+</html>
